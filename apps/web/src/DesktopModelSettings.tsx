@@ -1,0 +1,11 @@
+import { useEffect, useState } from 'react'
+import { Settings2, X } from 'lucide-react'
+import { api } from './api'
+export function DesktopModelSettings(){
+  const [desktop,setDesktop]=useState(false),[open,setOpen]=useState(false),[url,setUrl]=useState(''),[model,setModel]=useState(''),[key,setKey]=useState(''),[configured,setConfigured]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[clear,setClear]=useState(false)
+  useEffect(()=>{void api<{desktop:boolean}>('/health').then(h=>setDesktop(h.desktop)).catch(()=>{})},[])
+  async function show(){try{const c=await api<{base_url:string;model:string;key_configured:boolean}>('/desktop-config');setUrl(c.base_url);setModel(c.model);setConfigured(c.key_configured);setKey('');setMessage('');setClear(false);setOpen(true)}catch{setMessage('暂时无法打开设置')}}
+  async function save(){setBusy(true);try{await api('/desktop-config',{method:'PUT',body:JSON.stringify({base_url:url,model,api_key:key||null,clear_key:clear})});setOpen(false)}catch(e){setMessage((e as Error).message)}finally{setBusy(false)}}
+  if(!desktop)return null
+  return <><button onClick={()=>void show()} aria-label="模型设置"><Settings2 size={16}/><span>模型设置</span></button>{open&&<div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="桌面模型设置"><div className="modal-heading"><h2>连接你的聊天模型</h2><button aria-label="关闭模型设置" onClick={()=>setOpen(false)}><X size={20}/></button></div><p>填入兼容 Chat Completions 的服务信息即可聊天；留空时仍可体验基础选餐。使用模型时，你的消息和有效记忆会发送给所填的模型服务。</p><form onSubmit={e=>{e.preventDefault();void save()}}><label>服务地址<input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://api.deepseek.com" maxLength={500}/></label><label>模型名称<input value={model} onChange={e=>setModel(e.target.value)} placeholder="填写服务商提供的模型名" maxLength={100}/></label><label>API Key<input type="password" autoComplete="off" value={key} onChange={e=>setKey(e.target.value)} placeholder={configured?'已保存，留空保留原密钥':'填写你的密钥'}/></label>{configured&&<label><span><input type="checkbox" checked={clear} onChange={e=>setClear(e.target.checked)}/> 清除已保存的密钥</span></label>}<p className="muted">密钥由 Windows 加密，仅保存在此电脑的当前用户下，不会随安装包发布。</p>{message&&<p role="alert">{message}</p>}<button className="primary wide" disabled={busy}>{busy?'正在保存…':'保存设置'}</button></form></section></div>}</>
+}

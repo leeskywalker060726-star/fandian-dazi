@@ -94,6 +94,12 @@ class Food(Base):
     data: Mapped[dict] = mapped_column(JSON)
 
 
+class CatalogState(Base):
+    __tablename__ = 'catalog_state'
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON)
+
+
 class Conversation(Base):
     __tablename__ = 'conversations'
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)

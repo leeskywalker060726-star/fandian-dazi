@@ -17,3 +17,10 @@ desktop-data/
 !.env.example
 
 *.tsbuildinfo
+data/local/
+*美团数据接入*.zip
+data/raw/
+settings.json
+settings.tmp
+*.pem
+*.key

@@ -1,13 +1,15 @@
 from mcp.server.fastmcp import FastMCP
-from apps.api.seed import catalog
+from apps.api.seed import catalog, catalog_info
 
 server = FastMCP('饭点搭子餐食目录')
 
 
 @server.tool()
-def search_foods(campus_id: str = 'demo-campus', limit: int = 40) -> dict:
-    """查询演示校园餐食目录，返回菜品、原料、价格及时间字段。只读工具。"""
-    return {'foods': [f for f in catalog() if f['campus_id'] == campus_id][:max(1,min(limit,40))], 'source': 'demo'}
+def search_foods(campus_id: str = '', limit: int = 500, offset: int = 0) -> dict:
+    """查询当前启用的目录。采集快照不是实时商品；null 字段表示未知。支持分页，只读。"""
+    foods=[f for f in catalog() if not campus_id or f['campus_id']==campus_id]
+    start=max(0,offset); end=start+max(1,min(limit,500))
+    return {'foods':foods[start:end],'total':len(foods),'next_offset':end if end<len(foods) else None,'catalog':catalog_info()}
 
 
 @server.tool()

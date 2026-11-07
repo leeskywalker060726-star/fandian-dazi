@@ -21,10 +21,10 @@ def rule_plan(text):
     def once(fragment):
         return any(w in fragment for w in ['今天','这顿','这次','今晚'])
     if re.search(r'过敏|血糖|糖尿病|治疗|热量|大卡', text):
-        return TurnPlan(intent='clarify', clarification='当前演示目录没有经过核验的过敏安全或营养数据，不能据此确认适合你。可以按一般口味和预算筛选，过敏或医疗饮食需求需要向商户核实。')
+        return TurnPlan(intent='clarify', clarification='当前目录没有经过核验的过敏安全或营养数据，不能据此确认适合你。可以按一般口味和预算筛选，过敏或医疗饮食需求需要向商户核实。')
     if re.search(r'他说|她说|朋友说|同学说|如果|假设|举例|比如|“|「|"', text):
         return TurnPlan(intent='clarify', clarification='这是你本人这次的需求，还是转述别人的偏好？我先不把它记到你的资料里。')
-    if re.search(r'吃什么|推荐|选一|帮.*选|想吃|想喝|这顿|清淡点|清淡一点', text):
+    if re.search(r'吃什么|推荐|选一|帮.*选|想吃|想喝|这顿|清淡点|清淡一点|(?:想|要|点|来份).*外卖', text):
         plan.intent = 'recommend'
     if re.search(r'为什么|为啥|哪一个|第[一二三123]个|这个.*(?:辣|远|贵|多久)|刚才.*(?:推荐|那个)',text):
         plan.intent = 'answer'
@@ -53,9 +53,13 @@ def rule_plan(text):
         amount = int(number) if number.isdigit() else {'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}[number]
         if 1 <= amount <= 12:
             plan.patch.party_size = amount
-    if '外卖' in text and '食堂' not in text:
+    if re.search(r'(?:不想|不要|不吃|不去|不考虑).{0,2}食堂',text):
         plan.patch.channel = 'delivery'
-    if '食堂' in text and '外卖' not in text:
+    elif re.search(r'(?:不想|不要|不吃|不点|不考虑).{0,2}外卖',text):
+        plan.patch.channel = 'canteen'
+    elif '外卖' in text and '食堂' not in text:
+        plan.patch.channel = 'delivery'
+    elif '食堂' in text and '外卖' not in text:
         plan.patch.channel = 'canteen'
     if '都可以' in text or '不限渠道' in text:
         plan.patch.channel = 'all'

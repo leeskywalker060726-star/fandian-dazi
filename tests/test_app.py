@@ -2,6 +2,7 @@ import io
 import json
 import os
 import zipfile
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -12,6 +13,7 @@ os.environ['USE_MYSQL'] = 'false'
 os.environ['MCP_ENABLED'] = 'false'
 os.environ['LLM_API_KEY'] = ''
 os.environ['APP_MODE'] = 'demo'
+os.environ['FANDIAN_CATALOG'] = 'demo'
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +23,114 @@ from apps.api.db import Memory, NarrativeMemory, User, Conversation, Session, en
 from apps.api.planner import rule_plan
 from apps.api.recommendation import recommend
 from apps.api.seed import catalog
+
+
+def capture_fixture(count=1):
+    """Entirely synthetic menu, safe to publish as a regression fixture."""
+    from apps.api.catalog_import import build
+    items=[{'id':str(i),'name':'番茄鸡蛋面','min_price':18.8,'skus':[{'stock':3,'price':18.8}]} for i in range(count)]
+    menus={'captured_at':'2026-01-01T12:00:00','address':'测试校区','shops':[{'id':'test-shop','name':'测试面馆','items':items}]}
+    shops={'captured_at':'2026-01-01T12:05:00','shops':[{'id':'test-shop','categories':['面馆'],'deliveryMinutes':20,'shippingFee':'免配送费'}]}
+    return build(menus,shops)
+
+
+@pytest.fixture
+def snapshot_catalog(client):
+    from apps.api.catalog_import import activate,use_demo
+    from apps.api.db import Food
+    from sqlalchemy import delete
+    activate(capture_fixture())
+    yield client
+    use_demo()
+    with Session.begin() as db:
+        db.execute(delete(Food).where(Food.id.like('mt_%')))
+
+
+def test_capture_filters_and_preserves_unknowns():
+    from apps.api.catalog_import import build,ingredient_hints,shipping
+    items=[
+        {'id':'1','name':'牛肉拌面+例汤套餐','min_price':9,'skus':[{'stock':0,'price':9},{'stock':10,'price':19}]},
+        {'id':'1','name':'重复牛肉拌面','min_price':9},
+        {'id':'2','name':'凉拌黄瓜','min_price':11.8},
+        {'id':'3','name':'加一份米粉','min_price':12},
+        {'id':'4','name':'猪肉水饺','min_price':18,'skus':[{'stock':0,'price':18}]},
+    ]
+    doc=build({'captured_at':'2026-01-01','address':'测试','shops':[{'id':'s','name':'测试商户','items':items}]},
+              {'shops':[{'id':'s','categories':['面馆'],'shippingFee':'满30配送约¥0'}]})
+    assert len(doc['foods'])==2 and doc['metadata']['duplicates']==1
+    first=doc['foods'][0]
+    assert first['price_cents']==1900 and first['available'] is True
+    assert all(first[k] is None for k in ['delivery_cents','packaging_cents','open_hour','spice','delivery_min'])
+    assert doc['foods'][1]['available'] is False
+    assert ingredient_hints('鲜肉包子与鸡蛋')==['鸡蛋']
+    assert shipping('配送 ¥0')==0 and shipping('配送 ¥2.5')==250
+    assert shipping('满22配送约¥0.8') is None
+
+
+def test_capture_candidates_are_not_cost_or_diet_guarantees(snapshot_catalog):
+    from apps.api.responder import food_references
+    result,_=turn(snapshot_catalog,'想点外卖，预算25元')
+    food=result['recommendations'][0]
+    assert food['total_cents']==1880 and food['price_complete'] is False
+    assert food['spice'] is None and food['needs_confirmation'] is True
+    assert food['total_min']==48 and food['packaging_cents'] is None
+    assert any('待核实' in n for n in result['notices'])
+    assert '预算内' not in ''.join(food['reasons'])
+    refs=food_references([food])[food['id']]
+    assert '未知' in refs['spice'] and '未知包装费' in refs['price'] and '非实时' in refs['duration']
+    assert not recommend(catalog(),{'budget_max':10},{})[0]
+    assert not recommend(catalog(),{'budget_max':25,'available_minutes':40},{})[0]
+    assert not recommend(catalog(),{'budget_max':25,'excluded_ingredients':['鸡蛋']},{})[0]
+
+
+def test_import_is_idempotent_and_preserves_personal_data(client):
+    from apps.api.catalog_import import activate,use_demo
+    from apps.api.seed import catalog_info
+    from apps.api.db import Food
+    from sqlalchemy import delete,func
+    old,_=turn(client,'吃什么')
+    tables=(User,Memory,NarrativeMemory,Conversation)
+    def counts():
+        with Session() as db: return [db.scalar(select(func.count()).select_from(t)) for t in tables]
+    before=counts()
+    try:
+        a=activate(capture_fixture());b=activate(capture_fixture())
+        assert a==b and counts()==before and len(catalog())==1
+        assert catalog_info()['mode']=='meituan_snapshot'
+        assert client.get('/api/v1/conversations/latest').json()['recommendations']==[]
+        assert client.post('/api/v1/conversations/'+old['id']+'/select',json={'food_id':old['recommendations'][0]['id'],'expected_version':old['version']}).status_code==409
+        invalid=deepcopy(capture_fixture());invalid['foods'][0]['price_cents']=-1
+        with pytest.raises(ValueError): activate(invalid)
+        assert catalog_info()==a and counts()==before
+        use_demo();assert len(catalog())==24 and counts()==before
+    finally:
+        use_demo()
+        with Session.begin() as db: db.execute(delete(Food).where(Food.id.like('mt_%')))
+
+
+def test_mcp_reads_full_active_catalog(snapshot_catalog,monkeypatch):
+    import asyncio
+    from apps.api.catalog_import import activate
+    from apps.api.catalog_gateway import read_catalog
+    from apps.food_mcp import search_foods
+    activate(capture_fixture(521))
+    page=search_foods(limit=20)
+    assert len(page['foods'])==20 and page['total']==521 and page['next_offset']==20
+    assert search_foods(campus_id='demo-campus')['foods']==[]
+    monkeypatch.setenv('MCP_ENABLED','true')
+    foods,mode=asyncio.run(read_catalog())
+    assert mode=='mcp' and len(foods)==521
+
+
+def test_updated_capture_invalidates_previous_choices(snapshot_catalog):
+    from apps.api.catalog_import import activate
+    result,_=turn(snapshot_catalog,'吃什么')
+    updated=capture_fixture();updated['metadata']['captured_at']='2026-01-02T12:00:00'
+    activate(updated)
+    response=snapshot_catalog.post('/api/v1/conversations/'+result['id']+'/select',json={'food_id':result['recommendations'][0]['id'],'expected_version':result['version']})
+    assert response.status_code==409
+    reply,_=turn(snapshot_catalog,'刚才那个为什么推荐',result)
+    assert not reply['recommendations']
 
 
 @pytest.fixture
@@ -355,3 +465,36 @@ def test_desktop_gate_and_model_config(client,monkeypatch,tmp_path):
         assert os.environ['LLM_API_KEY']=='TEST_KEY_NOT_REAL'
         cleared=client.put('/api/v1/desktop-config',json={'base_url':'','model':'','clear_key':True})
         assert cleared.status_code==200 and not cleared.json()['key_configured']
+
+
+def test_desktop_ignores_inherited_model_credentials(monkeypatch,tmp_path):
+    from desktop.main import configure
+    from desktop.settings import public
+    for key in ('FANDIAN_DESKTOP','USE_MYSQL','DATABASE_URL','APP_MODE','MCP_ENABLED','FANDIAN_CATALOG'):
+        monkeypatch.setenv(key,os.environ.get(key,''))
+    monkeypatch.setenv('FANDIAN_DATA_DIR',str(tmp_path))
+    monkeypatch.setenv('LLM_API_KEY','INHERITED_TEST_KEY_NOT_REAL')
+    monkeypatch.setenv('LLM_BASE_URL','https://example.invalid')
+    monkeypatch.setenv('LLM_MODEL','inherited-model')
+    configure()
+    assert public()=={'base_url':'','model':'','key_configured':False}
+    assert os.environ['LLM_API_KEY']=='' and os.environ['USE_MYSQL']=='false'
+    assert not (tmp_path/'settings.json').exists()
+
+
+def test_published_catalog_startup_and_persistent_demo(client,monkeypatch):
+    from apps.api.catalog_import import load_startup_catalog,use_demo
+    from apps.api.db import CatalogState,Food
+    from apps.api.seed import catalog_info
+    from sqlalchemy import delete
+    monkeypatch.delenv('FANDIAN_CATALOG')
+    with Session.begin() as db: db.execute(delete(CatalogState))
+    try:
+        load_startup_catalog()
+        assert catalog_info()['mode']=='meituan_snapshot'
+        assert len(catalog())==132 and sum(f['available'] for f in catalog())==42
+        use_demo();load_startup_catalog()
+        assert catalog_info()['mode']=='demo' and len(catalog())==24
+    finally:
+        use_demo()
+        with Session.begin() as db: db.execute(delete(Food).where(Food.id.like('mt_%')))

@@ -28,7 +28,7 @@ from .planner import plan_turn, explicit_remember, RECOMMEND_INTENTS
 from .responder import compose_reply
 from .recommendation import recommend
 from .schemas import AuthInput, ChatInput, ContextInput, FeedbackInput, MemoryInput, Onboarding, SelectInput, Strict, NarrativeInput, VersionInput, TurnPlan
-from .seed import catalog, initialize
+from .seed import catalog, catalog_info, initialize
 
 hasher = PasswordHasher()
 locks: dict[str, asyncio.Lock] = {}
@@ -41,10 +41,12 @@ def lock_for(user_id):
 @asynccontextmanager
 async def lifespan(app):
     initialize()
+    from .catalog_import import load_startup_catalog
+    load_startup_catalog()
     yield
 
 
-app = FastAPI(title='饭点搭子 API', version='0.1.0', lifespan=lifespan)
+app = FastAPI(title='饭点搭子 API', version='0.3.0', lifespan=lifespan)
 
 
 @app.middleware('http')
@@ -109,8 +111,9 @@ def owned_conversation(db, cid, user_id):
 
 def conversation_json(c):
     last = next((m for m in reversed(c.messages) if m['role'] == 'assistant'), {})
+    current_catalog=last.get('catalog_revision','demo')==catalog_info().get('digest','demo')
     return {'id':c.id, 'version':c.version, 'state':c.state, 'messages':c.messages,
-            'recommendations':c.recommendations if last.get('show_recommendations',True) else [], 'closed':c.closed,
+            'recommendations':c.recommendations if current_catalog and last.get('show_recommendations',True) else [], 'closed':c.closed,
             'response_kind':last.get('response_kind','recommend'), 'reply_mode':last.get('reply_mode'),
             'model_mode':last.get('model_mode'), 'catalog_mode':last.get('catalog_mode')}
 
@@ -123,7 +126,12 @@ def context_of(user):
 @app.get('/api/v1/health')
 async def health():
     from .db import engine
-    return {'status':'ok', 'database':engine.dialect.name, 'desktop':os.getenv('FANDIAN_DESKTOP')=='1', 'model_configured': bool(os.getenv('LLM_API_KEY') and os.getenv('LLM_MODEL') and os.getenv('LLM_BASE_URL')), 'data_mode':'demo'}
+    return {'status':'ok', 'database':engine.dialect.name, 'desktop':os.getenv('FANDIAN_DESKTOP')=='1', 'model_configured': bool(os.getenv('LLM_API_KEY') and os.getenv('LLM_MODEL') and os.getenv('LLM_BASE_URL')), 'data_mode':catalog_info()['mode']}
+
+
+@app.get('/api/v1/catalog')
+async def get_catalog_info():
+    return catalog_info()
 
 
 class DesktopConfig(Strict):
@@ -283,6 +291,10 @@ async def execute_chat(data, user_id):
             current = memory.effective(db,user,c.state)
             profile, revision = memory.context(db,user)
             history = memory.safe_history(c.messages,revision)
+            catalog_revision=catalog_info().get('digest','demo')
+            last=next((m for m in reversed(c.messages) if m['role']=='assistant'),{})
+            if last.get('catalog_revision','demo')!=catalog_revision:
+                history=[]
             state, scene = dict(c.state), context_of(user)
             previous = c.recommendations if history else []
             enabled = user.memory_enabled
@@ -343,6 +355,10 @@ async def execute_chat(data, user_id):
         reply_profile={**profile,'facts':projected,'overview':memory.summarize(projected),'current_constraints':constraints}
         # Both network calls finish before the atomic write: a failed turn cannot half-save memory.
         answer,reply_mode=await compose_reply(data.text,plan,reply_foods,reply_profile,history,notices,selection_summary)
+        if any(f.get('source_kind')=='meituan_snapshot' for f in reply_foods):
+            notices.append('这些是采集菜单中的待核实候选：标价按采集时规格起价计算，未含未知包装费；配送费可能有门槛。营业、库存、口味和忌口需向商户确认。时间按历史送达报价估算，不保证当前可达。')
+        if catalog_info().get('digest','demo')!=catalog_revision:
+            raise HTTPException(409,'餐食目录刚刚更新，请重新发送这条消息')
         if model_mode=='fallback' or reply_mode=='fallback':
             notices.append('模型暂时未能完成本轮回复，已使用简短备用回复。')
         with Session.begin() as db:
@@ -370,7 +386,7 @@ async def execute_chat(data, user_id):
                 {'id':uid(),'role':'user','content':data.text,'memory_revision':saved_revision},
                 {'id':uid(),'role':'assistant','content':answer,'notices':notices,'model_mode':model_mode,
                  'reply_mode':reply_mode,'catalog_mode':catalog_mode,'response_kind':plan.intent,
-                 'show_recommendations':show_cards,'memory_revision':saved_revision}]
+                 'show_recommendations':show_cards,'memory_revision':saved_revision,'catalog_revision':catalog_revision}]
             result={**conversation_json(c),'constraints':constraints,'notices':notices,'memory_version':user.version}
             db.add(Turn(id=turn_id,user_id=user_id,request_hash=fingerprint,result=result))
             return result
@@ -575,6 +591,9 @@ async def select_meal(cid: str, data: SelectInput, user_id=Depends(get_user)):
                 return {'id':existing.id,'food':existing.food}
             if c.version != data.expected_version:
                 raise HTTPException(409,'推荐已更新，请刷新后选择')
+            last=next((m for m in reversed(c.messages) if m['role']=='assistant'),{})
+            if last.get('catalog_revision','demo')!=catalog_info().get('digest','demo'):
+                raise HTTPException(409,'餐食目录已更新，请重新推荐后选择')
             food = next((x for x in c.recommendations if x['id'] == data.food_id),None)
             if not food:
                 raise HTTPException(422,'请选择本轮推荐中的餐食')

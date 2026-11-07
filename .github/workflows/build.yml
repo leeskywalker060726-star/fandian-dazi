@@ -20,6 +20,7 @@ jobs:
       - run: python -m pytest -q
       - run: python -m PyInstaller desktop/fandian.spec --distpath release --workpath build --noconfirm
       - run: python scripts/package_desktop.py
+      - run: python scripts/check_release.py --history --bundle release/FandianDazi
       - uses: actions/upload-artifact@v4
         with:
           name: FandianDazi-windows-x64

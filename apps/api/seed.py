@@ -1,5 +1,5 @@
 from sqlalchemy import select
-from .db import Base, Food, Session, engine
+from .db import Base, CatalogState, Food, Session, engine
 
 # All vendors, prices, ingredients and timings below are fictional demo fixtures.
 VENDORS = [
@@ -65,4 +65,13 @@ def initialize():
 
 def catalog():
     with Session() as db:
-        return [row.data for row in db.scalars(select(Food).order_by(Food.id))]
+        state=db.get(CatalogState,'active')
+        real=bool(state and state.data.get('mode')=='meituan_snapshot')
+        return [row.data for row in db.scalars(select(Food).order_by(Food.id))
+                if (row.data.get('source_kind')=='meituan_snapshot')==real]
+
+
+def catalog_info():
+    with Session() as db:
+        state=db.get(CatalogState,'active')
+        return dict(state.data) if state else {'mode':'demo','digest':'demo','catalog_items':24,'candidate_items':24}

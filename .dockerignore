@@ -8,3 +8,10 @@ __pycache__
 dist
 tests
 *.log
+.env.*
+release
+data/local
+data/raw
+*美团数据接入*.zip
+settings.json
+settings.tmp

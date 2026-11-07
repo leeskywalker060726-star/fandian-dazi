@@ -10,6 +10,25 @@
 
 内置本地数据库，个人数据留在自己的电脑。右上角“模型设置”可连接兼容 Chat Completions 的模型服务；密钥由 Windows 加密保存。未配置时可体验基础规则选餐。调用外部模型时会发送本轮聊天与相关有效记忆。
 
+## 首次使用：在 App 内配置自己的 API Key
+
+**仓库和桌面发行包不包含 DeepSeek API Key。AI 聊天需要你自行配置；未配置时仅提供基础规则选餐，不会调用模型。**
+
+1. 打开桌面 App，选择访客体验或注册本地账号，完成偏好设置。
+2. 点击右上角 **“连接聊天模型”**（配置后显示“模型设置”）。
+3. 使用 DeepSeek 时，服务地址填写 `https://api.deepseek.com`，模型名称填写 `deepseek-flash` 或你账号可用的其他模型 ID，API Key 填写你自己的密钥。不要在地址后添加 `/chat/completions`。[DeepSeek 官方配置说明](https://api-docs.deepseek.com/)
+4. 点击“保存设置”，下一条消息即可使用模型。保存不会自动发起计费请求；是否可调用取决于密钥、模型权限、余额和网络。
+
+密钥通过 Windows DPAPI 加密保存在 `%LOCALAPPDATA%\FandianDazi\settings.json`，绑定当前 Windows 用户；界面不会回显密钥。**桌面版不读取项目 `.env`，也不继承开发机环境变量里的模型密钥。** 更换电脑需重新配置；可以在模型设置里清除密钥。不要把 `.env`、`settings.json`、数据库或含密钥截图上传到 GitHub。
+
+使用外部模型会发送本轮消息、有限对话上下文与相关有效记忆，费用由你填写的模型服务收取。
+
+## 本版菜单
+
+v0.3.0 附带[清洗后的菜单目录](data/catalog_meituan.json)，新安装默认启用。它来自 2026-11-02 的复旦大学北苑周边菜单快照：132 条正餐记录，其中 42 条参与初筛，90 条采集时库存为零的记录暂不推荐。包含采集日期与缺失信息标注，不包含平台图片、原始采集压缩包或个人数据。
+
+这不是美团官方应用或实时接口。包装费、营业状态、库存、辣度和配料仍需向商户确认；选择餐食不会下单。数据字段与更新/切换方式见[菜单接入说明](docs/本地菜单接入.md)。
+
 ## 从源码运行网页版
 
 需要 Python 3.13 和 Node.js 24：
@@ -22,7 +41,7 @@ npm run build
 .venv\Scripts\python.exe -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-打开 <http://127.0.0.1:8000>。默认使用 SQLite；可复制 `.env.example` 为 `.env` 配置 MySQL 和模型。密钥不要提交到 Git。
+打开 <http://127.0.0.1:8000>。默认使用 SQLite。源码网页版供开发调试，可在本机 `.env` 配置 MySQL 和模型；`.env.example` 中的密钥为空，真实 `.env` 被 Git 忽略。希望通过界面配置模型时，请使用桌面 App，或运行 `.venv\Scripts\python.exe -m desktop.main`（需先安装 `requirements-desktop.txt`）。网页版不开放修改服务器级模型密钥的公共接口。
 
 ```powershell
 # 测试
@@ -38,7 +57,7 @@ React + TypeScript / FastAPI / SQLAlchemy / MySQL 或 SQLite / MCP / pywebview�
 - 聊天先识别意图，仅明确选餐时查询目录和展示卡片。
 - 记忆包括预算、忌口、自然语言概览及本人生活背景段落；支持确认、有效期、编辑、忘记、Skill ZIP 导出。
 - 推荐金额、完整用餐时间和忌口由后端筛选；模型负责理解和自然语言回复。
-- 所有餐食、路线、价格和天气为演示数据；不会代替下单。
+- 新安装默认使用随仓库附带的历史菜单快照；可以[导入其他快照或切回虚构演示目录](docs/本地菜单接入.md)。明确标注采集时间、未知费用与待确认信息。路线和天气仍为演示，不会代替下单。
 - 尚无 RAG、真实课表天气、自动更新或数字签名。请勿视为已完成生产部署加固。
 
 ![段落记忆页面](docs/screenshots/memory-paragraph-desktop.jpg)

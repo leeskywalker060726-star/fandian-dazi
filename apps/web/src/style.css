@@ -418,3 +418,6 @@ em{font-style:normal}
 textarea{font:inherit;resize:vertical;width:100%;min-height:130px;border:1px solid #dfe4da;border-radius:10px;padding:13px 14px;background:white;color:#2e4437;line-height:1.7}
 textarea:focus{outline:none;border-color:#7c9d74;box-shadow:0 0 0 3px #7c9d741c}
 @media(max-width:600px){.story-memory,.memory-overview{padding:17px}.story-memory>p,.memory-overview p{font-size:13px}.memory-stories .section-row{align-items:flex-start;gap:10px}.story-memory-heading{align-items:flex-start}.pending-memory-link{font-size:10px}.section-description{font-size:11px}}
+.catalog-banner{display:flex;gap:12px;align-items:flex-start;background:#f0f4e8;border:1px solid #dce5cd;border-radius:14px;padding:14px 16px;margin:0 0 22px;color:#405536;font-size:13px;line-height:1.65}
+.catalog-banner svg{flex-shrink:0;margin-top:3px}.catalog-banner p{margin:4px 0 0}.catalog-note{font-size:13px;line-height:1.7;background:#f0f4e8;border-radius:10px;padding:12px}.price-note{font-size:11px;color:#77745e;margin:2px 0 12px}
+.food-title h3{overflow-wrap:anywhere}.food-title strong{white-space:nowrap}.food-tags{flex-wrap:wrap}.food-card .vendor{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

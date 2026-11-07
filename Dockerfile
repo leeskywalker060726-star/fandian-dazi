@@ -11,6 +11,7 @@ WORKDIR /app
 COPY requirements.lock.txt ./
 RUN pip install --no-cache-dir -r requirements.lock.txt
 COPY apps ./apps
+COPY data/catalog_meituan.json ./data/catalog_meituan.json
 COPY scripts/init_db.py ./scripts/init_db.py
 COPY --from=web /app/dist ./dist
 RUN useradd --create-home app && mkdir -p /app/.runtime && chown -R app:app /app

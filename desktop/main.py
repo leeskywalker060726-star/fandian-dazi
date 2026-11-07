@@ -17,6 +17,12 @@ def configure():
     os.environ['DATABASE_URL']='sqlite:///'+(directory/'fandian.db').as_posix()
     os.environ['APP_MODE']='demo'
     os.environ['MCP_ENABLED']='true'
+    # Optional offline catalog stays outside the public executable bundle.
+    portable=Path(sys.executable).parent/'catalog.json' if getattr(sys,'frozen',False) else Path(__file__).resolve().parent.parent/'data/local/catalog_meituan.json'
+    local=directory/'catalog.json'
+    if not os.getenv('FANDIAN_CATALOG'):
+        if local.is_file(): os.environ['FANDIAN_CATALOG']=str(local)
+        elif portable.is_file(): os.environ['FANDIAN_CATALOG']=str(portable)
     from desktop.settings import load
     load()
     return directory
@@ -56,9 +62,16 @@ def main():
             conv=c.post('/api/v1/conversations').json()
             result=c.post('/api/v1/chat',json={'conversation_id':conv['id'],'expected_version':0,'request_id':str(uuid4()),'text':'吃什么'}).json()
             assert result['recommendations'] and result['catalog_mode']=='mcp',result.get('catalog_mode')
+            health=c.get('/api/v1/health').json()
+            if os.getenv('FANDIAN_EXPECT_UNCONFIGURED')=='1':
+                assert health['model_configured'] is False
+                assert result['model_mode']=='rules' and result['reply_mode']=='rules'
+            info=c.get('/api/v1/catalog').json()
+            if os.getenv('FANDIAN_EXPECT_CATALOG'):
+                assert info['mode']==os.environ['FANDIAN_EXPECT_CATALOG']
             assert c.get('/').status_code==200
             c.delete('/api/v1/me/data').raise_for_status()
-            (directory/'smoke-result.json').write_text(json.dumps({'passed':True,'catalog_mode':result['catalog_mode'],'database':'sqlite'}),encoding='utf-8')
+            (directory/'smoke-result.json').write_text(json.dumps({'passed':True,'catalog_mode':result['catalog_mode'],'data_mode':info['mode'],'model_configured':health['model_configured'],'database':'sqlite'}),encoding='utf-8')
     else:
         import webview
         webview.create_window('饭点搭子',f'http://127.0.0.1:{port}/desktop/start?token={secret}',width=1280,height=850,min_size=(780,600),background_color='#f7f8f2')

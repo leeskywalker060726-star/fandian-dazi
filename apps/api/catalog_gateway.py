@@ -23,13 +23,17 @@ async def read_catalog():
                     listing = await client.list_tools()
                     if 'search_foods' not in [tool.name for tool in listing.tools]:
                         raise ValueError('Missing catalog tool')
-                    result = await client.call_tool('search_foods', {'campus_id':'demo-campus','limit':40})
-                    if result.isError:
-                        raise ValueError('Catalog unavailable')
-                    payload = result.structuredContent
-                    if not payload:
-                        payload = json.loads(next(x.text for x in result.content if x.type == 'text'))
-                    return payload['foods'], 'mcp'
+                    foods=[]; offset=0
+                    while True:
+                        result=await client.call_tool('search_foods',{'limit':500,'offset':offset})
+                        if result.isError: raise ValueError('Catalog unavailable')
+                        payload=result.structuredContent or json.loads(next(x.text for x in result.content if x.type=='text'))
+                        foods.extend(payload['foods'])
+                        following=payload.get('next_offset')
+                        if following is None: break
+                        if following<=offset or following>=10000: raise ValueError('Invalid catalog page')
+                        offset=following
+                    return foods, 'mcp'
     except Exception:
         # A visible direct-repository fallback keeps the demo usable.
         return catalog(), 'fallback'
